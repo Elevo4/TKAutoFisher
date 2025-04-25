@@ -160,8 +160,9 @@ class MouseController:
     def press_mouse_move(start_x: int, start_y: int, 
                         x: int, y: int, button: str = 'left') -> None:
         """模拟鼠标拖拽操作"""
-        pyautogui.moveTo(start_x, start_y)
-        pyautogui.dragTo(start_x + x, start_y + y, button=button)
+        pyautogui.mouseDown(start_x, start_y, button=button)
+        pyautogui.moveTo(start_x + x, start_y + y, duration=0.03)
+        pyautogui.mouseUp(button=button)
     
     @staticmethod
     def click(position: Tuple[int, int]) -> None:
