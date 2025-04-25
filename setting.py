@@ -1,65 +1,109 @@
 import os
-from enum import Enum
 import sys
 import logging
+from enum import Enum
+from pathlib import Path
+from typing import Final
+
+class Config:
+    """配置类，管理所有配置项"""
+    
+    # 窗口配置
+    WINDOW_SIZE: Final[tuple[int, int, int, int]] = (163, 33, 1602, 946)
+    WINDOW_TITLE: Final[str] = "雷电模拟器"
+    
+    # 路径配置
+    BASE_DIR: Final[Path] = Path(__file__).parent.absolute()
+    RESULTS_DIR: Final[Path] = BASE_DIR / "images_res"
+    CONFIG_FILE: Final[Path] = BASE_DIR / "config.yaml"
+    
+    # 根据是否打包成exe选择不同的资源路径
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        IMAGE_DIR: Final[Path] = Path(getattr(sys, '_MEIPASS', BASE_DIR)) / "data"
+    else:
+        IMAGE_DIR: Final[Path] = BASE_DIR / "images"
+    
+    # 图像资源路径
+    START_FISH_BUTTON: Final[Path] = IMAGE_DIR / "start_fish.png"
+    UP_IMAGE: Final[Path] = IMAGE_DIR / "01_up.png"
+    LEFT_IMAGE: Final[Path] = IMAGE_DIR / "02_left.png"
+    DOWN_IMAGE: Final[Path] = IMAGE_DIR / "03_un.png"
+    RIGHT_IMAGE: Final[Path] = IMAGE_DIR / "04_right.png"
+    WIND_IMAGE: Final[Path] = IMAGE_DIR / "05_wind.png"
+    FIRE_IMAGE: Final[Path] = IMAGE_DIR / "06_fire.png"
+    RAY_IMAGE: Final[Path] = IMAGE_DIR / "07_ray.png"
+    ELECTRICITY_IMAGE: Final[Path] = IMAGE_DIR / "08_electricity.png"
+    BAIT_IMAGE: Final[Path] = IMAGE_DIR / "huaner.png"
+    USE_BUTTON: Final[Path] = IMAGE_DIR / "use_button.png"
+    TIME_IMAGE: Final[Path] = IMAGE_DIR / "time.png"
+    BUY_BUTTON: Final[Path] = IMAGE_DIR / "buy_button.png"
+    PUSH_ROD_BUTTON: Final[Path] = IMAGE_DIR / "push_gan_button.png"
+    PRESSURE_IMAGE: Final[Path] = IMAGE_DIR / "guogao.png"
+    RETRY_BUTTON: Final[Path] = IMAGE_DIR / "again_button.png"
+    CURRENT_UI: Final[Path] = IMAGE_DIR / "current_UI.png"
+    
+    # 方向图标列表
+    DIRECTION_ICONS: Final[list[Path]] = [
+        UP_IMAGE, DOWN_IMAGE, LEFT_IMAGE, RIGHT_IMAGE,
+        WIND_IMAGE, FIRE_IMAGE, RAY_IMAGE, ELECTRICITY_IMAGE
+    ]
+    
+    @classmethod
+    def setup_logging(cls) -> None:
+        """配置日志系统"""
+        # 确保日志目录存在
+        cls.RESULTS_DIR.mkdir(exist_ok=True)
+        
+        # 日志配置
+        log_file = cls.RESULTS_DIR / "log.txt"
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+            datefmt='%a, %d %b %Y %H:%M:%S',
+            filename=str(log_file),
+            encoding='utf-8',
+            filemode='a'
+        )
+        
+        # 添加控制台输出
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        console.setFormatter(formatter)
+        logging.getLogger('').addHandler(console)
+        
+        # 写入初始日志
+        logging.info("开始记录日志")
+    
+    @classmethod
+    def verify_resources(cls) -> None:
+        """验证必要的资源文件是否存在"""
+        required_files = [
+            cls.START_FISH_BUTTON,
+            cls.UP_IMAGE,
+            cls.LEFT_IMAGE,
+            cls.DOWN_IMAGE,
+            cls.RIGHT_IMAGE,
+            cls.WIND_IMAGE,
+            cls.FIRE_IMAGE,
+            cls.RAY_IMAGE,
+            cls.ELECTRICITY_IMAGE,
+            cls.BAIT_IMAGE,
+            cls.USE_BUTTON,
+            cls.TIME_IMAGE,
+            cls.BUY_BUTTON,
+            cls.PUSH_ROD_BUTTON,
+            cls.PRESSURE_IMAGE,
+            cls.RETRY_BUTTON
+        ]
+        
+        missing_files = [str(f) for f in required_files if not f.exists()]
+        if missing_files:
+            raise FileNotFoundError(
+                f"以下必要的资源文件缺失：\n{chr(10).join(missing_files)}"
+            )
 
 
-# 日志配置
-LOG_LEVEL = logging.INFO
-LOG_FORMAT = '%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s'
-LOG_DATE_FORMAT = '%a, %d %b %Y %H:%M:%S'
-LOG_FILE_NAME = 'log.txt'
-LOG_FILE_ENCODING = 'utf-8'
-LOG_FILE_MODE = 'a'
-with open(LOG_FILE_NAME, "w", encoding=LOG_FILE_ENCODING) as f:
-    f.write("开始记录日志：\n")
-
-logging.basicConfig(level=LOG_LEVEL,
-                    format=LOG_FORMAT,
-                    datefmt=LOG_DATE_FORMAT,
-                    filename=LOG_FILE_NAME,
-                    encoding=LOG_FILE_ENCODING,
-                    filemode=LOG_FILE_MODE)
-
-WINDOW_SIZE = (163, 33, 1602, 946)
-
-RESULTS_FOLDER = "images_res"
-CONFIG_FILE = "config.yaml"
-
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    # 获取exe文件所在的目录路径
-    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-    IMAGE_FOLDER = os.path.join(base_path, "data")
-    # logging.info(f"打包成exe文件,文件路径为{base_path}")
-else:
-    IMAGE_FOLDER = "images"
-    # logging.info(f"未打包成exe文件,文件路径为{os.path.abspath(__file__)}")
-
-START_FISH_BUTTON_PATH = os.path.join(IMAGE_FOLDER, "start_fish.png")
-UP_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "01_up.png")
-LEFT_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "02_left.png")
-DOWN_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "03_un.png")
-RIGHT_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "04_right.png")
-WIND_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "05_wind.png")
-FIRE_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "06_fire.png")
-RAY_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "07_ray.png")
-ELE_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "08_electricity.png")
-HUANER_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "huaner.png")
-USE_BUTTON_PATH = os.path.join(IMAGE_FOLDER, "use_button.png")
-TIME_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "time.png")
-BUY_BUTTON_PATH = os.path.join(IMAGE_FOLDER, "buy_button.png")
-PUSH_GAN_BUTTON_PATH = os.path.join(IMAGE_FOLDER, "push_gan_button.png")
-GUOGAO_IMAGE_PATH = os.path.join(IMAGE_FOLDER, "guogao.png")
-AGAIN_BUTTON_PATH = os.path.join(IMAGE_FOLDER, "again_button.png")
-CURRENT_UI_PATH = os.path.join(IMAGE_FOLDER, "current_UI.png")
-
-
-class fish_state(Enum):
-    DEFAULT = 0
-    PAO_GAN = 1
-    NO_YUER = 2
-    BU_YU = 3
-    START_FISHING = 4
-    END_FISHING = 5
-    MIAO_SHA = 6
-    EXIT = 7
+# 初始化配置
+Config.setup_logging()
+Config.verify_resources()

@@ -1,3 +1,4 @@
+import os
 import win32gui
 import win32con
 import pyautogui
@@ -7,479 +8,596 @@ import numpy as np
 import yaml
 import keyboard
 from threading import Thread
-from setting import *
+from enum import Enum, auto
+from typing import Optional, Tuple, Dict, Any
+from dataclasses import dataclass
+from setting import Config
 import logging
 
 
-# 查找窗口句柄
-def find_window(title):
-    return win32gui.FindWindow(None, title)
+class FishState(Enum):
+    """钓鱼游戏的状态枚举"""
+    START_FISHING = auto()  # 开始钓鱼
+    CAST_ROD = auto()       # 抛竿
+    NO_BAIT = auto()        # 鱼饵不足
+    CATCH_FISH = auto()     # 捕鱼
+    FISHING = auto()        # 钓鱼中
+    INSTANT_KILL = auto()   # 秒杀
+    END_FISHING = auto()    # 结束钓鱼
+    EXIT = auto()           # 退出
 
 
-# 获取窗口位置和大小
-def get_window_rect(hwnd):
-    return win32gui.GetWindowRect(hwnd)
+@dataclass
+class GameConfig:
+    """游戏配置数据类"""
+    window_title: str  # 模拟器窗口标题
+    window_size: Tuple[int, int, int, int]  # 模拟器窗口大小和位置 (x, y, width, height)
+    start_fishing_pos: Optional[Tuple[int, int]] = None  # 开始钓鱼按钮的中心点坐标
+    rod_position: Optional[Tuple[int, int]] = None  # 钓鱼界面拉杆位置中心点坐标
+    pressure_indicator_pos: Optional[Tuple[int, int]] = None  # 用来判断压力是否过高的点的位置
+    low_pressure_color: Optional[Tuple[int, int, int]] = None  # 用来判断压力是否过高的点的颜色
+    original_rod_color: Optional[Tuple[int, int, int]] = None  # 钓鱼界面拉杆位置中心点颜色
+    direction_icon_positions: Optional[Dict[str, Tuple[int, int]]] = None  # 方向图标位置字典
+    retry_button_center: Optional[Tuple[int, int]] = None  # 再来一次按钮的中心点坐标
+    use_bait_button_pos: Optional[Tuple[int, int]] = None  # 使用鱼饵按钮的位置
+    rod_retrieve_interval: int = 15  # 收杆的间隔
+    wait_time: float = 0.065  # 钓鱼时点击的间隔
 
 
-def bring_to_front(hwnd):
-    # 将窗口置于最前端
-    win32gui.SetForegroundWindow(hwnd)
-    # 确保窗口激活
-    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-
-
-def get_screenshot(size, is_save=False, save_path=None):
-    img = pyautogui.screenshot(region=size)
-    img_np = np.array(img)
-    img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-    if is_save:
-        img.save(save_path)
-    return img_np
-
-
-def write_dict(config_dic, key, value):
-    config_dic[key] = value
-
-
-def write_yaml(data, name):
-    with open(name, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f)
-
-
-def read_yaml(name):
-    with open(name, 'r', encoding='utf-8') as f:
-        data = yaml.load(f, Loader=yaml.FullLoader)
-    return data
-
-
-def press_mouse_move(start_x, start_y, x, y, button='left'):
-    pyautogui.moveTo(start_x, start_y)
-    pyautogui.dragTo(start_x + x, start_y + y, button=button)
-
-
-def is_match_template_by_path(img_path, template_path, threshold=0.8):
-    template = cv2.imread(template_path)
-    img = cv2.imread(img_path)
-    # 模板匹配
-    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-    loc = np.where(res >= threshold)
-    # 如果找到匹配项，则返回True
-    if len(loc[0]) > 0:
-        return True
-    else:
-        return False
-
-
-def is_match_template_by_img(img, template, threshold=0.8):
-    # 模板匹配
-    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-    loc = np.where(res >= threshold)
-    # 如果找到匹配项，则返回True
-    if len(loc[0]) > 0:
-        return True
-    else:
-        return False
-
-
-def match_template_by_path(img_path, template_path, is_save=False, save_name=None, save_path=None, threshold=0.8):
-    template = cv2.imread(template_path)
-    img = cv2.imread(img_path)
-    # 模板匹配
-    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-    loc = np.where(res >= threshold)
-    # 如果找到匹配项，则返回位置
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-    center = (int(max_loc[0] + template.shape[1] / 2), int(max_loc[1] + template.shape[0] / 2))
-    cv2.circle(img, center, 5, (0, 0, 255), -1)
-    if len(loc[0]) > 0:
-        for pt in zip(*loc[::-1]):
-            cv2.rectangle(img, pt, (pt[0] + template.shape[1], pt[1] + template.shape[0]), (0, 0, 255), 1)
-    if is_save:
-        cv2.imwrite(os.path.join(save_path, save_name), img)
-    return center
-
-
-def match_template_by_img(img, template, is_save=False, save_name=None, save_path=None, threshold=0.8):
-    # 模板匹配
-    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-    loc = np.where(res >= threshold)
-    # 如果找到匹配项，则返回位置
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-    center = (int(max_loc[0] + template.shape[1] / 2), int(max_loc[1] + template.shape[0] / 2))
-    cv2.circle(img, center, 5, (0, 0, 255), -1)
-    if len(loc[0]) > 0:
-        for pt in zip(*loc[::-1]):
-            cv2.rectangle(img, pt, (pt[0] + template.shape[1], pt[1] + template.shape[0]), (0, 0, 255), 1)
-    if is_save:
-        cv2.imwrite(os.path.join(save_path, save_name), img)
-    return center
-
-
-def check_current_UI():
-    """
-    检查当前状态,一共有5种UI：
-    1.抛竿界面,对应:huaner.png,fish_state.PAO_GAN,抛竿界面有两种状态转换：
-    一种是鱼饵不足，切换到鱼饵不足界面fish_state.NO_YUER，一种是鱼饵充足，正确进入钓鱼界面
-    2.鱼饵不足界面,对应:use_button.png
-    3.开始钓鱼界面,对应:time.png
-    4.结束钓鱼界面,对应:again_button.png
-    5.如果是史诗以上的鱼，还有秒杀界面,对应:01_up.png
-    :return:
-    """
-    global current_state, size,current_img
-    start_button = cv2.imread(START_FISH_BUTTON_PATH)
-    huaner = cv2.imread(HUANER_IMAGE_PATH)
-    use_button = cv2.imread(USE_BUTTON_PATH)
-    time_icon = cv2.imread(TIME_IMAGE_PATH)
-    buy_button = cv2.imread(BUY_BUTTON_PATH)
-    push_gan_button = cv2.imread(PUSH_GAN_BUTTON_PATH)
-    again_button = cv2.imread(AGAIN_BUTTON_PATH)
-    up_button = cv2.imread(UP_IMAGE_PATH)
-    current_UI_path = os.path.join(IMAGE_FOLDER, "current_UI.png")
-
-    while True:
-        current_img = get_screenshot(size, is_save=False, save_path=current_UI_path)
-        if current_state == fish_state.DEFAULT:
-            if is_match_template_by_img(current_img, start_button, threshold=0.8):
-                logging.info("开始钓鱼界面，状态不变")
-                continue
-            elif is_match_template_by_img(current_img, huaner, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到抛竿状态")
-                current_state = fish_state.PAO_GAN
-            elif is_match_template_by_img(current_img, use_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到鱼饵不足状态")
-                current_state = fish_state.NO_YUER
-            elif is_match_template_by_img(current_img, again_button, threshold=0.7):
-                logging.info(f"当前状态: {current_state} 转换到结束钓鱼状态")
-                current_state = fish_state.END_FISHING
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.PAO_GAN:
-            if is_match_template_by_img(current_img, use_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到鱼饵不足状态")
-                current_state = fish_state.NO_YUER
-            elif is_match_template_by_img(current_img, time_icon, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到开始钓鱼状态")
-                current_state = fish_state.BU_YU
-            elif is_match_template_by_img(current_img, buy_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 鱼饵不足")
-                current_state = fish_state.EXIT
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.NO_YUER:
-            if not is_match_template_by_img(current_img, use_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到抛竿状态")
-                current_state = fish_state.PAO_GAN
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.BU_YU:
-            if is_match_template_by_img(current_img, push_gan_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到开始钓鱼状态")
-                current_state = fish_state.START_FISHING
-            elif is_match_template_by_img(current_img, again_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到结束钓鱼状态")
-                current_state = fish_state.END_FISHING
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.START_FISHING:
-            if is_match_template_by_img(current_img, again_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到结束钓鱼状态")
-                current_state = fish_state.END_FISHING
-            elif is_match_template_by_img(current_img, up_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到秒杀状态")
-                current_state = fish_state.MIAO_SHA
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.END_FISHING:
-            if is_match_template_by_img(current_img, huaner, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到抛竿状态")
-                current_state = fish_state.PAO_GAN
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.MIAO_SHA:
-            if is_match_template_by_img(current_img, again_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到结束钓鱼状态")
-                current_state = fish_state.END_FISHING
-            elif is_match_template_by_img(current_img, push_gan_button, threshold=0.8):
-                logging.info(f"当前状态: {current_state} 转换到继续钓鱼状态")
-                current_state = fish_state.START_FISHING
-            if keyboard.is_pressed('esc'):
-                logging.info(f"当前状态: {current_state} 转换到退出状态, 退出原因: 按下esc")
-                current_state = fish_state.EXIT
-            continue
-        elif current_state == fish_state.EXIT:
-            logging.info("钓鱼结束")
-            break
-
-
-def fenlei_all_pos(point_list):
-    """
-    对识别出来的所有位置进行分类，得到图像的位置
-    :return: 返回分类好的一堆点的平均值
-    """
-    res_points = []
-    for i in range(len(point_list)):
-        m_set = set()
-        if point_list[i] is None:
-            continue
-        m_set.add(point_list[i])
-        for j in range(i + 1, len(point_list)):
-            if point_list[j] is None:
-                continue
-            if abs(point_list[i][0] - point_list[j][0]) < 10 and abs(point_list[i][1] - point_list[j][1]) < 10:
-                m_set.add(point_list[j])
-                point_list[j] = None
-        if len(m_set) > 1:
-            average_x = int(sum([x[0] for x in m_set]) / len(m_set))
-            average_y = int(sum([x[1] for x in m_set]) / len(m_set))
-            res_points.append((average_x, average_y))
-    return res_points
-
-
-def handle_window(config_dic):
-    """
-    处理窗口,包括查找窗口、调整窗口大小、置顶窗口等
-    :return:
-    """
-    window_title = config_dic.get('window_title', None)
-    if window_title is None:
-        window_title = "MuMu模拟器12"
-        write_dict(config_dic, 'window_title', window_title)
-        write_yaml(config_dic, CONFIG_FILE)
-        exit("请设置窗口标题")
-    # 示例：查找记事本窗口
-    hWnd = find_window(window_title)
-    if hWnd:
-        bring_to_front(hWnd)
-        win32gui.SetWindowPos(hWnd, None, size[0], size[1], size[2], size[3], 0)
+class WindowManager:
+    """窗口管理类，处理窗口相关的操作"""
+    
+    @staticmethod
+    def find_window(title: str) -> int:
+        """查找指定标题的窗口句柄"""
+        return win32gui.FindWindow(None, title)
+    
+    @staticmethod
+    def get_window_rect(hwnd: int) -> Tuple[int, int, int, int]:
+        """获取窗口位置和大小"""
+        return win32gui.GetWindowRect(hwnd)
+    
+    @staticmethod
+    def bring_to_front(hwnd: int) -> None:
+        """将窗口置于最前端并激活"""
+        win32gui.SetForegroundWindow(hwnd)
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    
+    @staticmethod
+    def handle_window(config: GameConfig) -> None:
+        """处理窗口配置和位置"""
+        hwnd = WindowManager.find_window(config.window_title)
+        if not hwnd:
+            raise ValueError(f"未找到标题为 {config.window_title} 的窗口")
+        
+        WindowManager.bring_to_front(hwnd)
+        win32gui.SetWindowPos(hwnd, None, *config.window_size, 0)
         time.sleep(0.5)
+
+class ImageProcessor:
+    """图像处理类，处理所有图像相关的操作"""
+    
+    @staticmethod
+    def get_screenshot(size: Tuple[int, int, int, int], 
+                      is_save: bool = False, 
+                      save_path: Optional[str] = None) -> np.ndarray:
+        """获取屏幕截图"""
+        img = pyautogui.screenshot(region=size)
+        img_np = np.array(img)
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        if is_save and save_path:
+            img.save(save_path)
+        return img_np
+    
+    @staticmethod
+    def is_match_template(img: np.ndarray, 
+                         template: np.ndarray, 
+                         threshold: float = 0.8) -> bool:
+        """模板匹配判断"""
+        res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+        loc = np.where(res >= threshold)
+        return len(loc[0]) > 0
+    
+    @staticmethod
+    def match_template(img: np.ndarray, 
+                      template: np.ndarray, 
+                      threshold: float = 0.8,
+                      position: Tuple[float, float] = (0.5, 0.5)) -> Tuple[int, int]:
+        """模板匹配并返回指定位置
+        
+        Args:
+            img: 输入图像
+            template: 模板图像
+            threshold: 匹配阈值
+            position: 归一化位置坐标，范围[0,1]，(0,0)表示左上角，(1,1)表示右下角，默认为(0.5,0.5)即中心位置
+                    如果值超出范围，将自动调整到最近的合法值
+            
+        Returns:
+            返回指定位置的坐标 (x, y)
+        """
+        # 将position值限制在[0,1]范围内
+        clamped_x = max(0, min(1, position[0]))
+        clamped_y = max(0, min(1, position[1]))
+        
+        # 如果值被调整，记录日志
+        if clamped_x != position[0] or clamped_y != position[1]:
+            logging.warning(f"position参数值被调整: {position} -> ({clamped_x}, {clamped_y})")
+            
+        res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+        
+        # 获取模板的宽高
+        template_width = template.shape[1]
+        template_height = template.shape[0]
+        
+        # 根据归一化位置计算实际坐标
+        x = int(max_loc[0] + template_width * clamped_x)
+        y = int(max_loc[1] + template_height * clamped_y)
+            
+        return (x, y)
+
+
+class ConfigManager:
+    """配置管理类，处理配置文件的读写"""
+    
+    @staticmethod
+    def write_yaml(data: Dict[str, Any]) -> None:
+        """写入YAML配置文件"""
+        with open(str(Config.CONFIG_FILE), 'w', encoding='utf-8') as f:
+            yaml.dump(data, f)
+    
+    @staticmethod
+    def read_yaml() -> Dict[str, Any]:
+        """读取YAML配置文件"""
+        with open(str(Config.CONFIG_FILE), 'r', encoding='utf-8') as f:
+            return yaml.load(f, Loader=yaml.FullLoader)
+
+
+class MouseController:
+    """鼠标控制类，处理所有鼠标操作"""
+    
+    @staticmethod
+    def press_mouse_move(start_x: int, start_y: int, 
+                        x: int, y: int, button: str = 'left') -> None:
+        """模拟鼠标拖拽操作"""
+        pyautogui.moveTo(start_x, start_y)
+        pyautogui.dragTo(start_x + x, start_y + y, button=button)
+    
+    @staticmethod
+    def click(position: Tuple[int, int]) -> None:
+        """点击指定位置"""
+        pyautogui.click(position)
+
+
+class FishingStateManager:
+    """负责状态管理和转换的类"""
+
+    def __init__(self):
+        self.ui_recognizer = FishingUIRecognizer()
+        self.current_state = FishState.START_FISHING
+        self._setup_state_flags()
+    
+    def _setup_state_flags(self) -> None:
+        """初始化状态标志"""
+        self.first_start_fishing = True
+        self.first_cast_rod = True
+        self.first_no_bait = True
+        self.first_catch_fish = True
+        self.first_fishing = True
+        self.first_retry = True
+        self.first_instant_kill = True
+        self.rod_retrieve_time = 0
+    
+    def update_state(self, current_img: np.ndarray) -> None:
+        """更新当前状态"""
+        old_state = self.current_state
+        
+        match self.current_state:
+            case FishState.START_FISHING:
+                if self.ui_recognizer.check_cast_rod_ui(current_img):
+                    self.current_state = FishState.CAST_ROD
+            
+            case FishState.CAST_ROD:
+                if self.ui_recognizer.check_no_bait_ui(current_img):
+                    self.current_state = FishState.NO_BAIT
+                elif self.ui_recognizer.check_catch_fish_ui(current_img):
+                    self.current_state = FishState.CATCH_FISH
+            
+            case FishState.NO_BAIT:
+                if not self.ui_recognizer.check_no_bait_ui(current_img):
+                    self.current_state = FishState.CAST_ROD
+            
+            case FishState.CATCH_FISH:
+                if self.ui_recognizer.check_fishing_ui(current_img):
+                    # FISHING 页面已就绪，但有些元素状态重置需要时间，比如挥杆
+                    time.sleep(2)
+                    self.current_state = FishState.FISHING
+            
+            case FishState.FISHING:
+                if self.ui_recognizer.check_end_fishing_ui(current_img):
+                    self.current_state = FishState.END_FISHING
+                elif self.ui_recognizer.check_instant_kill_ui(current_img):
+                    self.current_state = FishState.INSTANT_KILL
+
+            case FishState.INSTANT_KILL:
+                if self.ui_recognizer.check_end_fishing_ui(current_img):
+                    self.current_state = FishState.END_FISHING
+            
+            case FishState.END_FISHING:
+                if self.ui_recognizer.check_cast_rod_ui(current_img):
+                    self.current_state = FishState.CAST_ROD
+        
+        if old_state != self.current_state:
+            logging.info(f"页面状态变化: {old_state} -> {self.current_state}")
+    
+    def reset_state_flags(self) -> None:
+        """重置所有状态标志"""
+        self._setup_state_flags()
+
+class FishingPositionDetector:
+    """负责位置检测的类"""
+    
+    def __init__(self, config: GameConfig):
+        self.config = config
+    
+    def detect_start_fishing_pos(self) -> None:
+        """检测开始钓鱼按钮位置"""
+        start_fishing_UI_img = ImageProcessor.get_screenshot(self.config.window_size)
+        start_fishing_button_img = cv2.imread(str(Config.START_FISH_BUTTON))
+        pos = ImageProcessor.match_template(start_fishing_UI_img, start_fishing_button_img)
+        self.config.start_fishing_pos = (
+            pos[0] + self.config.window_size[0],
+            pos[1] + self.config.window_size[1]
+        )
+        ConfigManager.write_yaml(self.config.__dict__)
+    
+    def detect_fishing_positions(self) -> None:
+        """检测钓鱼相关位置"""
+        fishing_img = ImageProcessor.get_screenshot(self.config.window_size)
+        push_rod_icon = cv2.imread(str(Config.PUSH_ROD_BUTTON))
+        pressure_img = cv2.imread(str(Config.PRESSURE_IMAGE))
+        
+        rod_pos = ImageProcessor.match_template(fishing_img, push_rod_icon)
+        pressure_pos = ImageProcessor.match_template(fishing_img, pressure_img)
+        
+        self.config.rod_position = (
+            rod_pos[0] + self.config.window_size[0],
+            rod_pos[1] + self.config.window_size[1]
+        )
+        self.config.pressure_indicator_pos = (
+            pressure_pos[0] + self.config.window_size[0],
+            pressure_pos[1] + self.config.window_size[1]
+        )
+        
+        self.config.low_pressure_color = pyautogui.pixel(*self.config.pressure_indicator_pos)
+        self.config.original_rod_color = pyautogui.pixel(*self.config.rod_position)
+        
+        ConfigManager.write_yaml(self.config.__dict__)
+    
+    def detect_use_button_pos(self) -> None:
+        """检测使用按钮位置"""
+        bait_ui_img = ImageProcessor.get_screenshot(self.config.window_size)
+        use_button_img = cv2.imread(str(Config.USE_BUTTON))
+        pos = ImageProcessor.match_template(bait_ui_img, use_button_img)
+        self.config.use_bait_button_pos = (
+            pos[0] + self.config.window_size[0],
+            pos[1] + self.config.window_size[1]
+        )
+        ConfigManager.write_yaml(self.config.__dict__)
+    
+    def detect_retry_button_pos(self) -> None:
+        """检测再次钓鱼按钮位置"""
+        game_over_img = ImageProcessor.get_screenshot(self.config.window_size)
+        retry_icon = cv2.imread(str(Config.RETRY_BUTTON))
+        pos = ImageProcessor.match_template(game_over_img, retry_icon)
+        self.config.retry_button_center = (
+            pos[0] + self.config.window_size[0],
+            pos[1] + self.config.window_size[1]
+        )
+        ConfigManager.write_yaml(self.config.__dict__)
+    
+    def detect_direction_icons(self) -> None:
+        """检测方向图标位置"""
+        bottom_half_size = (
+            self.config.window_size[0],
+            (self.config.window_size[1] + self.config.window_size[3]) // 2,
+            self.config.window_size[2],
+            (self.config.window_size[1] + self.config.window_size[3]) // 2
+        )
+        bottom_half_img = ImageProcessor.get_screenshot(bottom_half_size)
+        
+        self.config.direction_icon_positions = {}
+        for dir_icon_path in Config.DIRECTION_ICONS:
+            dir_icon = cv2.imread(str(dir_icon_path))
+            pos = ImageProcessor.match_template(bottom_half_img, dir_icon)
+            name = dir_icon_path.stem
+            self.config.direction_icon_positions[name] = (
+                pos[0] + bottom_half_size[0],
+                pos[1] + bottom_half_size[1]
+            )
+        
+        ConfigManager.write_yaml(self.config.__dict__)
+
+
+class FishingActionExecutor:
+    """负责执行具体的钓鱼动作的类"""
+    
+    def __init__(self, config: GameConfig):
+        self.config = config
+        self.rod_retrieve_time = 0
+    
+    def handle_default_state(self) -> None:
+        """处理默认状态"""
+        MouseController.click(self.config.start_fishing_pos)
+    
+    def handle_cast_rod_state(self) -> None:
+        """处理抛竿状态"""
+        MouseController.press_mouse_move(
+            self.config.start_fishing_pos[0],
+            self.config.start_fishing_pos[1],
+            0, -100
+        )
+    
+    def handle_no_bait_state(self) -> None:
+        """处理鱼饵不足状态"""
+        MouseController.click(self.config.use_bait_button_pos)
+    
+    def handle_catch_fish_state(self) -> None:
+        """处理捕鱼状态"""
+        MouseController.click(self.config.start_fishing_pos)
+    
+    def handle_first_fishing(self) -> None:
+        """处理第一次钓鱼"""
+        self.rod_retrieve_time = time.time()
+        pyautogui.mouseDown(self.config.start_fishing_pos, button='left')
+        time.sleep(2)
+        pyautogui.mouseUp(button='left')
+    
+    def handle_ongoing_fishing(self) -> None:
+        """处理持续钓鱼状态"""
+        current_rod_color = pyautogui.pixel(*self.config.rod_position)
+        current_pressure_color = pyautogui.pixel(*self.config.pressure_indicator_pos)
+        
+        if current_rod_color != self.config.original_rod_color:
+            self.handle_rod_movement()
+        
+        if current_pressure_color != self.config.low_pressure_color:
+            self.config.wait_time = 0.2
+        else:
+            self.config.wait_time = 0.01
+        
+        if time.time() - self.rod_retrieve_time > self.config.rod_retrieve_interval:
+            self.handle_rod_retrieve()
+        
+        MouseController.click(self.config.start_fishing_pos)
+        time.sleep(self.config.wait_time)
+    
+    def handle_rod_movement(self) -> None:
+        """处理拉杆移动"""
+        MouseController.press_mouse_move(
+            self.config.rod_position[0],
+            self.config.rod_position[1],
+            100, 0
+        )
+        MouseController.press_mouse_move(
+            self.config.rod_position[0],
+            self.config.rod_position[1],
+            -100, 0
+        )
+    
+    def handle_rod_retrieve(self) -> None:
+        """处理收杆"""
+        MouseController.press_mouse_move(
+            self.config.start_fishing_pos[0],
+            self.config.start_fishing_pos[1],
+            0, -75
+        )
+        self.rod_retrieve_time = time.time()
+    
+    def handle_end_fishing_state(self) -> None:
+        """处理结束钓鱼状态"""
+        MouseController.click(self.config.retry_button_center)
+    
+    def handle_direction_sequence(self) -> None:
+        """处理方向序列"""
+        top_half_size = (
+            self.config.window_size[0],
+            self.config.window_size[1],
+            self.config.window_size[2],
+            (self.config.window_size[3] + self.config.window_size[1]) // 2
+        )
+        top_half_img = ImageProcessor.get_screenshot(top_half_size)
+        
+        all_icons_dict = {}
+        for dir_icon_path in Config.DIRECTION_ICONS:
+            dir_icon = cv2.imread(str(dir_icon_path))
+            res = cv2.matchTemplate(top_half_img, dir_icon, cv2.TM_CCOEFF_NORMED)
+            res_loc = np.where(res >= 0.8)
+            if len(res_loc[0]) > 0:
+                points = list(zip(*res_loc[::-1]))
+                classified_points = self._classify_positions(points)
+                for point in classified_points:
+                    all_icons_dict[point] = dir_icon_path.stem
+        
+        # 按x坐标排序
+        all_icons_list = sorted(all_icons_dict.items(), key=lambda x: x[0][0])
+        for pos, name in all_icons_list:
+            logging.info(f"{name}, 位置: {pos}")
+            click_pos = self.config.direction_icon_positions[name]
+            MouseController.click(click_pos)
+    
+    @staticmethod
+    def _classify_positions(point_list: list) -> list:
+        """对识别出来的所有位置进行分类"""
+        result_points = []
+        for i in range(len(point_list)):
+            point_set = set()
+            if point_list[i] is None:
+                continue
+            point_set.add(point_list[i])
+            for j in range(i + 1, len(point_list)):
+                if point_list[j] is None:
+                    continue
+                if (abs(point_list[i][0] - point_list[j][0]) < 10 and 
+                    abs(point_list[i][1] - point_list[j][1]) < 10):
+                    point_set.add(point_list[j])
+                    point_list[j] = None
+            if len(point_set) > 1:
+                average_x = int(sum([x[0] for x in point_set]) / len(point_set))
+                average_y = int(sum([x[1] for x in point_set]) / len(point_set))
+                result_points.append((average_x, average_y))
+        return result_points
+
+
+class FishingUIRecognizer:
+    """负责UI识别的类"""
+    
+    def check_start_fishing_ui(self, img: np.ndarray) -> bool:
+        """检查开始钓鱼界面"""
+        start_button = cv2.imread(str(Config.START_FISH_BUTTON))
+        return ImageProcessor.is_match_template(img, start_button)
+    
+    def check_cast_rod_ui(self, img: np.ndarray) -> bool:
+        """检查抛竿界面"""
+        huaner = cv2.imread(str(Config.BAIT_IMAGE))
+        return ImageProcessor.is_match_template(img, huaner)
+    
+    def check_no_bait_ui(self, img: np.ndarray) -> bool:
+        """检查鱼饵不足界面"""
+        use_button = cv2.imread(str(Config.USE_BUTTON))
+        return ImageProcessor.is_match_template(img, use_button)
+    
+    def check_catch_fish_ui(self, img: np.ndarray) -> bool:
+        """检查捕鱼界面"""
+        time_icon = cv2.imread(str(Config.TIME_IMAGE))
+        return ImageProcessor.is_match_template(img, time_icon)
+    
+    def check_fishing_ui(self, img: np.ndarray) -> bool:
+        """检查钓鱼界面"""
+        pressure_img = cv2.imread(str(Config.PRESSURE_IMAGE))
+        return ImageProcessor.is_match_template(img, pressure_img)
+    
+    def check_instant_kill_ui(self, img: np.ndarray) -> bool:
+        """检查秒杀界面"""
+        up_button = cv2.imread(str(Config.UP_IMAGE))
+        return ImageProcessor.is_match_template(img, up_button)
+    
+    def check_end_fishing_ui(self, img: np.ndarray) -> bool:
+        """检查结束钓鱼界面"""
+        retry_button = cv2.imread(str(Config.RETRY_BUTTON))
+        return ImageProcessor.is_match_template(img, retry_button)
+
+
+class FishingGame:
+    """钓鱼游戏主类"""
+    
+    def __init__(self):
+        self.config = self._load_config()
+        self.position_detector = FishingPositionDetector(self.config)
+        self.action_executor = FishingActionExecutor(self.config)
+        self.state_manager = FishingStateManager()
+    
+    def _load_config(self) -> GameConfig:
+        """加载游戏配置"""
+        if not Config.CONFIG_FILE.exists():
+            config_dict = {}
+        else:
+            config_dict = ConfigManager.read_yaml()
+        
+        # 设置默认窗口标题
+        if 'window_title' not in config_dict:
+            config_dict['window_title'] = Config.WINDOW_TITLE
+            ConfigManager.write_yaml(config_dict)
+        
+        # 设置窗口大小
+        config_dict['window_size'] = Config.WINDOW_SIZE
+        
+        return GameConfig(**config_dict)
+    
+    def check_current_UI(self) -> None:
+        """检查当前游戏界面状态"""
+        while True:
+            current_img = ImageProcessor.get_screenshot(self.config.window_size)
+            self.state_manager.update_state(current_img)
+            
+            if keyboard.is_pressed('esc'):
+                self.state_manager.current_state = FishState.EXIT
+                break
+    
+    def _handle_state(self) -> None:
+        """处理当前状态"""
+        match self.state_manager.current_state:
+            case FishState.START_FISHING if self.state_manager.first_start_fishing:
+                if not self.config.start_fishing_pos:
+                    self.position_detector.detect_start_fishing_pos()
+                self.action_executor.handle_default_state()
+                self.state_manager.first_start_fishing = False
+            
+            case FishState.CAST_ROD if self.state_manager.first_cast_rod:
+                self.action_executor.handle_cast_rod_state()
+                self.state_manager.first_cast_rod = False
+                self.state_manager.first_retry = True
+            
+            case FishState.NO_BAIT if self.state_manager.first_no_bait:
+                if not self.config.use_bait_button_pos:
+                    self.position_detector.detect_use_button_pos()
+                self.action_executor.handle_no_bait_state()
+                self.state_manager.first_no_bait = False
+                self.state_manager.first_cast_rod = True
+            
+            case FishState.CATCH_FISH if self.state_manager.first_catch_fish:
+                self.action_executor.handle_catch_fish_state()
+                self.state_manager.first_catch_fish = False
+            
+            case FishState.FISHING:
+                if not self.config.rod_position or not self.config.pressure_indicator_pos:
+                    self.position_detector.detect_fishing_positions()
+                if self.state_manager.first_fishing:
+                    self.action_executor.handle_first_fishing()
+                    self.state_manager.first_fishing = False
+                else:
+                    self.action_executor.handle_ongoing_fishing()
+            
+            case FishState.END_FISHING if self.state_manager.first_retry:
+                if not self.config.retry_button_center:
+                    self.position_detector.detect_retry_button_pos()
+                self.action_executor.handle_end_fishing_state()
+                self.state_manager.reset_state_flags()
+                self.state_manager.first_retry = False
+            
+            case FishState.INSTANT_KILL if self.state_manager.first_instant_kill:
+                if not self.config.direction_icon_positions:
+                    self.position_detector.detect_direction_icons()
+                self.action_executor.handle_direction_sequence()
+                self.state_manager.first_instant_kill = False
+
+    def run(self) -> None:
+        """运行游戏主循环"""
+        try:
+            WindowManager.handle_window(self.config)
+            state_check_thread = Thread(target=self.check_current_UI)
+            state_check_thread.start()
+            
+            while self.state_manager.current_state != FishState.EXIT:
+                self._handle_state()
+            
+            ConfigManager.write_yaml(self.config.__dict__)
+            logging.info("游戏结束")
+            
+        except Exception as e:
+            logging.error(f"游戏运行出错: {str(e)}")
+            raise
 
 
 def main():
-    global current_state, size,current_img
-
-    # 都是配置文件里面读取出来的变量
-    size = WINDOW_SIZE
-    if not os.path.exists(CONFIG_FILE):
-        config_dic = {}
-    else:
-        config_dic = read_yaml(CONFIG_FILE)
-    write_dict(config_dic, 'window_size', size)
-    current_state = fish_state.DEFAULT
-    handle_window(config_dic)
-
-    start_fishing_pos = config_dic.get('start_fishing_pos', None)
-    lagan_pos = config_dic.get('lagan_pos', None)
-    guogao_pos = config_dic.get('guogao_pos', None)
-    guogao_color = config_dic.get('guogao_color', None)
-    orgin_lagan_color = config_dic.get('orgin_lagan_color', None)
-    dir_icon_pos_list = config_dic.get('dir_icon_pos_list', None)
-    again_icon_center = config_dic.get('again_icon_center', None)
-    shougan_time = 0
-    shougan_interval = config_dic.get('shougan_interval', 15)
-    write_dict(config_dic, 'shougan_interval', shougan_interval)
-    wait_time = config_dic.get('wait_time', 0.065)
-    write_dict(config_dic, 'wait_time', wait_time)
-    dir_icon_path_list = [UP_IMAGE_PATH, DOWN_IMAGE_PATH, LEFT_IMAGE_PATH,
-                          RIGHT_IMAGE_PATH, WIND_IMAGE_PATH, FIRE_IMAGE_PATH,
-                          RAY_IMAGE_PATH, ELE_IMAGE_PATH]
-    # 用于控制某些状态的点击次数
-    start_fishing_first_click = True
-    first_paogan = True
-    first_huner = True
-    first_buyu = True
-    first_diaoyu = True
-    first_again = True
-    first_miao_sha = True
-    # 开启一个线程，检查当前状态
-    t1 = Thread(target=check_current_UI)
-    t1.start()
-    while True:
-        if current_state == fish_state.DEFAULT and start_fishing_first_click:
-            logging.info("进入默认状态")
-            if start_fishing_pos is None:
-                start_fishing_UI_path = os.path.join(IMAGE_FOLDER, "start_fishing_UI.png")
-                start_fishing_UI_img = get_screenshot(size, is_save=False, save_path=start_fishing_UI_path)
-                start_fishing_button_img = cv2.imread(START_FISH_BUTTON_PATH)
-                start_fishing_pos = match_template_by_img(start_fishing_UI_img, start_fishing_button_img, is_save=False,
-                                                          save_name="start_fishing_pos.png", save_path=RESULTS_FOLDER)
-                start_fishing_pos = (start_fishing_pos[0] + size[0], start_fishing_pos[1] + size[1])
-                write_dict(config_dic, 'start_fishing_pos', start_fishing_pos)
-                write_yaml(config_dic, CONFIG_FILE)
-                logging.info(f"""开始钓鱼按钮位置: {start_fishing_pos}""")
-            pyautogui.click(start_fishing_pos)
-            start_fishing_first_click = False
-            continue
-        elif current_state == fish_state.PAO_GAN and first_paogan:
-            logging.info("进入抛竿状态")
-            # 模拟点击拉杆
-            press_mouse_move(start_x=start_fishing_pos[0], start_y=start_fishing_pos[1], x=0, y=-100, button='left')
-            first_paogan = False
-            first_again = True
-            continue
-        elif current_state == fish_state.NO_YUER and first_huner:
-            logging.info("进入鱼饵不足状态")
-            use_button_path = os.path.join(IMAGE_FOLDER, "use_button.png")
-            huaner_UI_path = os.path.join(IMAGE_FOLDER, "huaner_UI.png")
-            huaner_UI_img = get_screenshot(size, is_save=False, save_path=huaner_UI_path)
-            use_button_img = cv2.imread(use_button_path)
-            use_button_pos = match_template_by_img(huaner_UI_img, use_button_img, is_save=False,
-                                                   save_name="use_button_pos.png", save_path=RESULTS_FOLDER)
-            use_button_pos = (use_button_pos[0] + size[0], use_button_pos[1] + size[1])
-            pyautogui.click(use_button_pos)
-            first_huner = False
-            first_paogan = True
-            continue
-        elif current_state == fish_state.BU_YU and first_buyu:
-            logging.info("进入叉鱼状态")
-            pyautogui.click(start_fishing_pos)
-            first_buyu = False
-            continue
-        elif current_state == fish_state.START_FISHING:
-            logging.info("进入开始钓鱼状态")
-            if lagan_pos is None:
-                shotscreen_path = os.path.join(IMAGE_FOLDER, "fishing_shotscreen.png")
-                fishing_shotscreen_img = get_screenshot(size, is_save=False, save_path=shotscreen_path)
-                push_gan_icon_img = cv2.imread(PUSH_GAN_BUTTON_PATH)
-                guogao_img = cv2.imread(GUOGAO_IMAGE_PATH)
-                lagan_pos = match_template_by_img(fishing_shotscreen_img, push_gan_icon_img, is_save=False,
-                                                  save_name="push_gan_icon.png", save_path=RESULTS_FOLDER)
-                guogao_pos = match_template_by_img(fishing_shotscreen_img, guogao_img, is_save=False,
-                                                   save_name="guogao_icon.png", save_path=RESULTS_FOLDER)
-                lagan_pos = (lagan_pos[0] + size[0], lagan_pos[1] + size[1])
-                guogao_pos = (guogao_pos[0] + size[0], guogao_pos[1] + size[1])
-                guogao_color = pyautogui.pixel(guogao_pos[0], guogao_pos[1])
-                write_dict(config_dic, 'lagan_pos', lagan_pos)
-                write_dict(config_dic, 'guogao_pos', guogao_pos)
-                write_dict(config_dic, 'guogao_color', guogao_color)
-                logging.info(f"拉杆位置: {lagan_pos},过高位置: {guogao_pos}, 过高颜色: {guogao_color}")
-                orgin_lagan_color = pyautogui.pixel(lagan_pos[0], lagan_pos[1])
-                write_dict(config_dic, 'orgin_lagan_color', orgin_lagan_color)
-                logging.info(f"拉杆颜色: {orgin_lagan_color}""")
-                write_yaml(config_dic, CONFIG_FILE)
-
-            # 第一次进入钓鱼界面，模拟一段时间长按
-            if first_diaoyu:
-                logging.info("第一次进入钓鱼界面，模拟长按")
-                shougan_time = time.time()
-                # 模拟长按一段时间
-                pyautogui.mouseDown(start_fishing_pos, button='left')
-                time.sleep(2)
-                pyautogui.mouseUp(button='left')
-                first_diaoyu = False
-            else:
-                now_lagan_color = pyautogui.pixel(lagan_pos[0], lagan_pos[1])
-                now_guogao_color = pyautogui.pixel(guogao_pos[0], guogao_pos[1])
-                if now_lagan_color != config_dic['orgin_lagan_color']:
-                    logging.info("拉杆颜色改变，尝试左右移动拉杆")
-                    press_mouse_move(start_x=lagan_pos[0], start_y=lagan_pos[1], x=100, y=0, button='left')
-                    press_mouse_move(start_x=lagan_pos[0], start_y=lagan_pos[1], x=-100, y=0, button='left')
-                if now_guogao_color != config_dic['guogao_color']:
-                    wait_time = 0.2
-                    config_dic['wait_time'] = wait_time
-                else:
-                    wait_time = 0.01
-                    config_dic['wait_time'] = wait_time
-                if time.time() - shougan_time > shougan_interval:
-                    logging.info("可以收杆了")
-                    press_mouse_move(start_x=start_fishing_pos[0], start_y=start_fishing_pos[1], x=0, y=-75,
-                                     button='left')
-                    shougan_time = time.time()
-                pyautogui.click(start_fishing_pos, button='left')
-                logging.info(f"当前等待时间: {wait_time}")
-                time.sleep(wait_time)
-            # 开始钓鱼
-            continue
-        elif current_state == fish_state.END_FISHING and first_again:
-            logging.info("进入结束钓鱼状态")
-            # 结束钓鱼
-            if again_icon_center is None:
-                agian_icon_path = os.path.join(IMAGE_FOLDER, "again_button.png")
-                again_icon = cv2.imread(agian_icon_path)
-                next_screenshot_path = os.path.join(IMAGE_FOLDER, "game_over_screenshot.png")
-                game_over_screenshot_img = get_screenshot(size, is_save=False, save_path=next_screenshot_path)
-                again_icon_center = match_template_by_img(game_over_screenshot_img, again_icon, is_save=False,
-                                                          save_name="again_icon.png", save_path=RESULTS_FOLDER)
-                again_icon_center = (again_icon_center[0] + size[0], again_icon_center[1] + size[1])
-                write_dict(config_dic, 'again_icon_center', again_icon_center)
-                write_yaml(config_dic, CONFIG_FILE)
-                logging.info(f"点击再次钓鱼按钮位置: {again_icon_center}")
-
-            pyautogui.click(again_icon_center)
-            first_again = False
-            start_fishing_first_click = True
-            first_paogan = True
-            first_huner = True
-            first_buyu = True
-            first_diaoyu = True
-            first_miao_sha = True
-            continue
-        elif current_state == fish_state.MIAO_SHA and first_miao_sha:
-            # 秒杀界面
-            if dir_icon_pos_list is None:
-                half_buttom_screenshot_path = os.path.join(IMAGE_FOLDER, "half_buttom_screenshot.png")
-                half_buttom_size = (size[0], (size[1] + size[3]) // 2, size[2], (size[1] + size[3]) // 2)
-                half_buttom_img = get_screenshot(half_buttom_size, is_save=False,
-                                                 save_path=half_buttom_screenshot_path)
-
-                dir_icon_pos_list = {}
-
-                for dir_icon_path in dir_icon_path_list:
-                    logging.info(f"当前方向图标路径: {dir_icon_path}")
-                    dir_icon = cv2.imread(dir_icon_path)
-                    dir_icon_pos = match_template_by_img(half_buttom_img, dir_icon, is_save=False,
-                                                         save_name=os.path.basename(dir_icon_path),
-                                                         save_path=RESULTS_FOLDER)
-                    dir_icon_pos = (dir_icon_pos[0] + half_buttom_size[0], dir_icon_pos[1] + half_buttom_size[1])
-                    name = os.path.basename(dir_icon_path).split('.')[0]
-                    dir_icon_pos_list[name] = dir_icon_pos
-                    logging.info(f"{name} 方向图标位置: {dir_icon_pos}""")
-                write_dict(config_dic, 'dir_icon_pos_list', dir_icon_pos_list)
-                write_yaml(config_dic, CONFIG_FILE)
-            all_icon_dic = {}
-            half_top_icon_path = os.path.join(IMAGE_FOLDER, "half_top_icon.png")
-            half_top_size = (size[0], size[1], size[2], (size[3] + size[1]) // 2)
-            half_top_img = get_screenshot(half_top_size, is_save=False,
-                                          save_path=half_top_icon_path)
-            for dir_icon_path in dir_icon_path_list:
-                dir_icon = cv2.imread(dir_icon_path)
-                res = cv2.matchTemplate(half_top_img, dir_icon, cv2.TM_CCOEFF_NORMED)
-                res_loc = np.where(res >= 0.8)
-                if len(res_loc[0]) > 0:
-                    points = list(zip(*res_loc[::-1]))
-                    res_points = fenlei_all_pos(points)
-                    for point in res_points:
-                        all_icon_dic[point] = os.path.basename(dir_icon_path).split('.')[0]
-            # 排序，从左到右
-            all_icon_list = sorted(all_icon_dic.items(), key=lambda x: x[0][0])
-            for pos, name in all_icon_list:
-                logging.info(f"{name}, 位置: {pos}")
-                print(f"{name}, 位置: {pos}")
-                click_pos = dir_icon_pos_list[name]
-                pyautogui.click(click_pos)
-            continue
-        elif current_state == fish_state.EXIT:
-            write_yaml(config_dic, CONFIG_FILE)
-            logging.info("退出程序")
-            break
-        else:
-            continue
+    """主函数"""
+    try:
+        game = FishingGame()
+        game.run()
+    except Exception as e:
+        logging.error(f"程序运行出错: {str(e)}")
+        raise
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception as e:
-        logging.error(e)
+    main()
