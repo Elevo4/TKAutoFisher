@@ -40,8 +40,6 @@ class GameConfig:
     direction_icon_positions: Optional[Dict[str, Tuple[int, int]]] = None  # 方向图标位置字典
     retry_button_center: Optional[Tuple[int, int]] = None  # 再来一次按钮的中心点坐标
     use_bait_button_pos: Optional[Tuple[int, int]] = None  # 使用鱼饵按钮的位置
-    rod_retrieve_interval: int = 15  # 收杆的间隔
-    wait_time: float = 0.065  # 钓鱼时点击的间隔
 
 
 class WindowManager:
@@ -258,7 +256,7 @@ class FishingPositionDetector:
         pressure_img = cv2.imread(str(Config.PRESSURE_IMAGE))
         
         rod_pos = ImageProcessor.match_template(fishing_img, push_rod_icon)
-        pressure_pos = ImageProcessor.match_template(fishing_img, pressure_img)
+        pressure_pos = ImageProcessor.match_template(fishing_img, pressure_img, position=(0.25, 0.5))
         
         self.config.rod_position = (
             rod_pos[0] + self.config.window_size[0],
@@ -324,6 +322,7 @@ class FishingActionExecutor:
     
     def __init__(self, config: GameConfig):
         self.config = config
+        self.fishing_click_time = 0
         self.rod_retrieve_time = 0
     
     def handle_default_state(self) -> None:
@@ -348,22 +347,29 @@ class FishingActionExecutor:
     
     def handle_ongoing_fishing(self) -> None:
         """处理持续钓鱼状态"""
+        current_time = time.time()
+        click_interval = Config.FISHING_CLICK_INTERVAL
+        pressure_check_interval = click_interval * 3
+
+        # 检查收杆
+        if current_time - self.rod_retrieve_time > Config.ROD_RETRIEVE_INTERVAL:
+            self.handle_rod_retrieve()
+
+        # 检查点击操作
+        if current_time - self.fishing_click_time >= click_interval:
+            current_pressure_color = pyautogui.pixel(*self.config.pressure_indicator_pos)
+            # 压力条颜色改变, 增加点击保护间隔
+            if current_pressure_color != self.config.low_pressure_color:
+                self.fishing_click_time = current_time + pressure_check_interval
+            # 压力条颜色未改变, 点击收杆
+            else:
+                MouseController.click(self.config.start_fishing_pos) 
+                self.fishing_click_time = current_time
+
+        # 拉竿检查
         current_rod_color = pyautogui.pixel(*self.config.rod_position)
-        current_pressure_color = pyautogui.pixel(*self.config.pressure_indicator_pos)
-        
         if current_rod_color != self.config.original_rod_color:
             self.handle_rod_movement()
-        
-        if current_pressure_color != self.config.low_pressure_color:
-            self.config.wait_time = 0.2
-        else:
-            self.config.wait_time = 0.01
-        
-        if time.time() - self.rod_retrieve_time > self.config.rod_retrieve_interval:
-            self.handle_rod_retrieve()
-        
-        MouseController.click(self.config.start_fishing_pos)
-        time.sleep(self.config.wait_time)
     
     def handle_rod_movement(self) -> None:
         """处理拉杆移动"""
@@ -569,6 +575,7 @@ class FishingGame:
     def run(self) -> None:
         """运行游戏主循环"""
         try:
+            pyautogui.PAUSE = Config.FISHING_CLICK_INTERVAL / 2
             WindowManager.handle_window(self.config)
             state_check_thread = Thread(target=self.check_current_UI)
             state_check_thread.start()

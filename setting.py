@@ -12,6 +12,10 @@ class Config:
     WINDOW_SIZE: Final[tuple[int, int, int, int]] = (163, 33, 1602, 946)
     WINDOW_TITLE: Final[str] = "雷电模拟器"
     
+    # 游戏配置
+    ROD_RETRIEVE_INTERVAL: Final[int] = 14 # 钓鱼时收杆的间隔
+    FISHING_CLICK_INTERVAL: Final[float] = 0.08 # 钓鱼时点击的间隔
+    
     # 路径配置
     BASE_DIR: Final[Path] = Path(__file__).parent.absolute()
     RESULTS_DIR: Final[Path] = BASE_DIR / "images_res"
