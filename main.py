@@ -184,7 +184,6 @@ class FishingStateManager:
         self.first_cast_rod = True
         self.first_no_bait = True
         self.first_catch_fish = True
-        self.first_fishing = True
         self.first_retry = True
         self.first_instant_kill = True
         self.rod_retrieve_time = 0
@@ -346,13 +345,6 @@ class FishingActionExecutor:
     def handle_catch_fish_state(self) -> None:
         """处理捕鱼状态"""
         MouseController.click(self.config.start_fishing_pos)
-    
-    def handle_first_fishing(self) -> None:
-        """处理第一次钓鱼"""
-        self.rod_retrieve_time = time.time()
-        pyautogui.mouseDown(self.config.start_fishing_pos, button='left')
-        time.sleep(2)
-        pyautogui.mouseUp(button='left')
     
     def handle_ongoing_fishing(self) -> None:
         """处理持续钓鱼状态"""
@@ -553,11 +545,7 @@ class FishingGame:
             case FishState.FISHING:
                 if not self.config.rod_position or not self.config.pressure_indicator_pos:
                     self.position_detector.detect_fishing_positions()
-                if self.state_manager.first_fishing:
-                    self.action_executor.handle_first_fishing()
-                    self.state_manager.first_fishing = False
-                else:
-                    self.action_executor.handle_ongoing_fishing()
+                self.action_executor.handle_ongoing_fishing()
             
             case FishState.END_FISHING if self.state_manager.first_retry:
                 if not self.config.retry_button_center:
