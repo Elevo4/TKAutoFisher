@@ -509,13 +509,19 @@ class FishingGame:
     
     def check_current_UI(self) -> None:
         """检查当前游戏界面状态"""
-        while True:
+        # 设置全局退出标志
+        self.should_exit = False
+        
+        # 添加热键监听器
+        keyboard.add_hotkey('esc', lambda: setattr(self, 'should_exit', True))
+        
+        while not self.should_exit:
             current_img = ImageProcessor.get_screenshot(self.config.window_size)
             self.state_manager.update_state(current_img)
-            
-            if keyboard.is_pressed('esc'):
-                self.state_manager.current_state = FishState.EXIT
-                break
+        
+        # 清理热键监听器
+        keyboard.remove_hotkey('esc')
+        self.state_manager.current_state = FishState.EXIT
     
     def _handle_state(self) -> None:
         """处理当前状态"""
