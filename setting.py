@@ -18,8 +18,9 @@ class Config:
     
     # 路径配置
     BASE_DIR: Final[Path] = Path(__file__).parent.absolute()
-    RESULTS_DIR: Final[Path] = BASE_DIR / "images_res"
-    CONFIG_FILE: Final[Path] = BASE_DIR / "config.yaml"
+    GENERATE_DIR: Final[Path] = BASE_DIR / "generate"
+    CONFIG_FILE: Final[Path] = GENERATE_DIR / "config.yaml"
+    LOG_FILE: Final[Path] = GENERATE_DIR / "log.txt"
     
     # 根据是否打包成exe选择不同的资源路径
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -56,15 +57,14 @@ class Config:
     def setup_logging(cls) -> None:
         """配置日志系统"""
         # 确保日志目录存在
-        cls.RESULTS_DIR.mkdir(exist_ok=True)
+        cls.GENERATE_DIR.mkdir(exist_ok=True)
         
         # 日志配置
-        log_file = cls.RESULTS_DIR / "log.txt"
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
             datefmt='%a, %d %b %Y %H:%M:%S',
-            filename=str(log_file),
+            filename=str(cls.LOG_FILE),
             encoding='utf-8',
             filemode='a'
         )
