@@ -181,7 +181,6 @@ class FishingStateManager:
         self.first_start_fishing = True
         self.first_cast_rod = True
         self.first_no_bait = True
-        self.first_catch_fish = True
         self.first_retry = True
         self.first_instant_kill = True
         self.rod_retrieve_time = 0
@@ -343,7 +342,11 @@ class FishingActionExecutor:
     
     def handle_catch_fish_state(self) -> None:
         """处理捕鱼状态"""
-        MouseController.click(self.config.start_fishing_pos)
+        click_interval = Config.FISHING_CLICK_INTERVAL * 3
+        current_time = time.time()
+        if current_time - self.fishing_click_time >= click_interval:
+            MouseController.click(self.config.start_fishing_pos)
+            self.fishing_click_time = current_time
     
     def handle_ongoing_fishing(self) -> None:
         """处理持续钓鱼状态"""
@@ -550,9 +553,8 @@ class FishingGame:
                 self.state_manager.first_no_bait = False
                 self.state_manager.first_cast_rod = True
             
-            case FishState.CATCH_FISH if self.state_manager.first_catch_fish:
+            case FishState.CATCH_FISH:
                 self.action_executor.handle_catch_fish_state()
-                self.state_manager.first_catch_fish = False
             
             case FishState.FISHING:
                 if not self.config.rod_position or not self.config.pressure_indicator_pos:
