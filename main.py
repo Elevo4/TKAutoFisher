@@ -170,10 +170,10 @@ class MouseController:
 
 class FishingStateManager:
     """负责状态管理和转换的类"""
-
-    def __init__(self):
+    
+    def __init__(self, current_img: np.ndarray):
         self.ui_recognizer = FishingUIRecognizer()
-        self.current_state = FishState.START_FISHING
+        self.current_state = self._determine_initial_state(current_img)
         self._setup_state_flags()
     
     def _setup_state_flags(self) -> None:
@@ -230,6 +230,36 @@ class FishingStateManager:
     def reset_state_flags(self) -> None:
         """重置所有状态标志"""
         self._setup_state_flags()
+        
+    def _determine_initial_state(self, current_img: np.ndarray) -> FishState:
+        """调整初始状态，兼容从任何页面启动程序
+        
+        Args:
+            current_img: 当前屏幕截图
+        """
+
+        state = FishState.START_FISHING
+        # 检查各个UI界面，设置对应的状态
+        if self.ui_recognizer.check_start_fishing_ui(current_img):
+            state = FishState.START_FISHING
+        elif self.ui_recognizer.check_cast_rod_ui(current_img):
+            state = FishState.CAST_ROD
+        elif self.ui_recognizer.check_no_bait_ui(current_img):
+            state = FishState.NO_BAIT
+        elif self.ui_recognizer.check_catch_fish_ui(current_img):
+            state = FishState.CATCH_FISH
+        elif self.ui_recognizer.check_fishing_ui(current_img):
+            state = FishState.FISHING
+        elif self.ui_recognizer.check_end_fishing_ui(current_img):
+            state = FishState.END_FISHING
+        elif self.ui_recognizer.check_instant_kill_ui(current_img):
+            state = FishState.INSTANT_KILL
+        else:
+            # 如果都不匹配，默认设置为开始钓鱼状态
+            state = FishState.START_FISHING
+            
+        logging.info(f"初始页面状态调整为: {state}")
+        return state
 
 class FishingPositionDetector:
     """负责位置检测的类"""
@@ -497,7 +527,9 @@ class FishingGame:
         self.config = self._load_config()
         self.position_detector = FishingPositionDetector(self.config)
         self.action_executor = FishingActionExecutor(self.config)
-        self.state_manager = FishingStateManager()
+
+        current_img = ImageProcessor.get_screenshot(self.config.window_size)
+        self.state_manager = FishingStateManager(current_img)
     
     def _load_config(self) -> GameConfig:
         """加载游戏配置"""
